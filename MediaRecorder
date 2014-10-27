@@ -1,0 +1,298 @@
+有四个按钮，分别是“录音”、“停止”、“播放”、“删除”。
+
+MediaRecorder的生命周期
+
+MediaRecorder可以用来录制音频或视频。它具有以下几个状态：
+Initial：初始状态，在设定视频源或者音频源之后将转换为Initialized状态。
+Initialized：已初始化状态，可以通过设置输出格式转换为DataSourceConfigured状态，或者通过重新启动转换成Initial状态。
+DataSourceConfigured：数据源配置状态，这期间可以设定编码方式、输出文件、屏幕旋转、预览显示等等。它仍然可以通过从新启动回到Initial状态，或者通过就绪到达Prepared状态。
+Prepared：就绪状态，在就绪状态仍然可以通过重新启动方法回到Initialized状态。或者通过start方法进入录制状态。
+Recording：录制状态，真正在录音的那个状态，前边做的一切都是铺垫，它可以通过停止或者重新启动回到Initial状态。
+Released：释放状态（官方文档给出的词叫做 Idle state 空闲状态，而官方的图却不这么写），Initial状态可以通过调用释放方法来进入这个状态，这时将会释放所有和MediaRecorder对象绑定的资源。
+Error：错误状态，当错误发生的时候进入这个状态，它可以通过从新启动进入Initial状态。
+
+通常使用MediaRecorder进行声音录制需要遵从以下几个步骤：
+ 
+
+实例化MediaRecorder类对象：
+MediaRecorder iMediaRecorder= new MediaRecorder();
+ 
+
+设置录音来源 :
+              iMediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
+ 
+设置输出格式:
+            iMediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.DEFAULT);
+ 
+设置编码方式
+          iMediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.DEFAULT);
+
+设置输出文件
+         iMediaRecorder.setOutputFile(PATH_NAME);
+ 
+让MediaRecorder对象处于就绪状态
+         iMediaRecorder.prepare();
+ 
+开始录音
+        iMediaRecorder.start();
+
+停止录音，一旦停止则必须从新配置MediaRecorder对象才能再次开始录音。
+        iMediaRecorder.stop();
+ 
+从新启动MediaRecorder对象让它处于空闲状态。
+        iMediaRecorder.reset();
+ 
+释放和MediaRecorder对向相关的所有资源。
+       iMediaRecorder.release();
+       
+       
+       
+程序如何实现
+
+OPhone华丽的界面，灵活的界面组合方式给我们开发者带来了极大的便利。
+首先来看看我们这个类的成员变量和初始化方法。成员变量一共包含四个ImageButton用来和用户进行交互，之所以用ImageButton是因为它可以把图片显示在按钮上，让程序看起来更加美观。一个ListView用来显示已经录制好的声音片段供用户选择。一个TextView用来告知用户当前程序状态。程序运行之初，将录音按钮以外的按钮设定成不可用状态。
+package com.ophone.iRecorder;
+
+//这里为了节省篇幅，忽略了import项
+public class ActivityMain extends Activity {  
+    private ImageButton iRecordButton;  
+    private ImageButton iStopButton;  
+    private ImageButton iPlayButton;  
+    private ImageButton iDeleteButton;  
+    private ListView iListView;  
+    private String iTempFileNameString = "iRecorder_";  
+    private File iRecAudioFile;  
+    private File iRecAudioDir;  
+    private File iPlayFile;  
+    private MediaRecorder iMediaRecorder;  
+  
+    private ArrayList<String> iRecordFiles;  
+    private ArrayAdapter<String> iAdapter;  
+    private TextView iTextView;  
+    private boolean isSDCardExit;  
+    private boolean isStopRecord;  
+  
+    /** Called when the activity is first created. */  
+    @Override  
+    public void onCreate(Bundle savedInstanceState) {  
+        super.onCreate(savedInstanceState);  
+        setContentView(R.layout.main);  
+  
+        iRecordButton = (ImageButton) findViewById(R.id.ImageButton01);  
+        iStopButton = (ImageButton) findViewById(R.id.ImageButton02);  
+        iPlayButton = (ImageButton) findViewById(R.id.ImageButton03);  
+        iDeleteButton = (ImageButton) findViewById(R.id.ImageButton04);  
+        iListView = (ListView) findViewById(R.id.ListView01);  
+        iTextView = (TextView) findViewById(R.id.TextView01);  
+        /* 初始后三个按钮不可用 */  
+        iStopButton.setEnabled(false);  
+        iPlayButton.setEnabled(false);  
+        iDeleteButton.setEnabled(false);  
+        
+需要判断SD卡是否是插入状态，以保证我们可以长时间的进行录音。如果存在则取得SD卡路径作为录音的文件位置。然后取得SD卡中的.amr文件。getRecordFiles()是一个自定义的方法，后面将会有说明。
+需要判断SD卡是否是插入状态，以保证我们可以长时间的进行录音。如果存在则取得SD卡路径作为录音的文件位置。然后取得SD卡中的.amr文件。getRecordFiles()是一个自定义的方法，后面将会有说明。
+view plaincopy to clipboardprint?
+isSDCardExit = Environment.getExternalStorageState().equals(  
+                android.os.Environment.MEDIA_MOUNTED);  
+if (isSDCardExit)  
+            iRecAudioDir = Environment.getExternalStorageDirectory();  
+        this.getRecordFiles();     
+        iAdapter = new ArrayAdapter<String>(this, R.layout.my_simple_list_item,  
+                iRecordFiles);  
+        /* 将ArrayAdapter添加ListView对象中 */  
+        iListView.setAdapter(iAdapter);  
+        
+对第一个录音按钮我们最需要注意的是在iMediaRecorder.start()之前我们必须调用iMediaRecorder.prepare()来捕获和编码数据，而且prepare()必须要在设置音频源、编码器、以及文件格式之后才能调用！
+
+view plaincopy to clipboardprint?
+iRecordButton.setOnClickListener(new ImageButton.OnClickListener() {  
+    @Override  
+    public void onClick(View arg0) {  
+        try {  
+            if (!isSDCardExit) {  
+                Toast.makeText(ActivityMain.this, "请插入SD Card",  
+                        Toast.LENGTH_LONG).show();  
+                return;  
+            }  
+            /* 创建录音文件 */  
+            iRecAudioFile = File.createTempFile(iTempFileNameString,  
+                    ".amr", iRecAudioDir);  
+            iMediaRecorder = new MediaRecorder();  
+            /* 设置录音来源为MIC */  
+            iMediaRecorder  
+                    .setAudioSource(MediaRecorder.AudioSource.MIC);  
+            iMediaRecorder  
+                    .setOutputFormat(MediaRecorder.OutputFormat.DEFAULT);  
+            iMediaRecorder  
+                    .setAudioEncoder(MediaRecorder.AudioEncoder.DEFAULT);  
+            iMediaRecorder.setOutputFile(iRecAudioFile  
+                    .getAbsolutePath());  
+            iMediaRecorder.prepare();  
+            iMediaRecorder.start();  
+            iTextView.setText("正在录音");  
+            iStopButton.setEnabled(true);  
+            iPlayButton.setEnabled(false);  
+            iDeleteButton.setEnabled(false);  
+            isStopRecord = false;  
+        } catch (IOException e) {  
+            // TODO Auto-generated catch block  
+            e.printStackTrace();  
+        }  
+    }  
+});  
+
+
+在停止录音的时候需要iMediaRecorder.stop()停止录音，一旦停止录音，必须从新配置MediaRecorder才可以。iMediaRecorder.release()用来释放和iMediaRecorder对象相关的所有资源。最后把iMediaRecorder赋值为null。
+
+view plaincopy to clipboardprint?
+iStopButton.setOnClickListener(new ImageButton.OnClickListener() {  
+      @Override  
+      public void onClick(View arg0) {  
+          // TODO Auto-generated method stub  
+          if (iRecAudioFile != null) {  
+              /* 停止录音 */  
+              iMediaRecorder.stop();  
+              iMediaRecorder.release();  
+              iMediaRecorder = null;  
+              /* 将录音频文件名给Adapter */  
+              iAdapter.add(iRecAudioFile.getName());  
+              iTextView.setText("停止：" + iRecAudioFile.getName());  
+              iStopButton.setEnabled(false);  
+              isStopRecord = true;  
+          }  
+      }  
+  });  
+  /* 播放 */  
+  iPlayButton.setOnClickListener(new ImageButton.OnClickListener() {  
+      @Override  
+      public void onClick(View arg0) {  
+          // TODO Auto-generated method stub  
+          if (iPlayFile != null && iPlayFile.exists()) {  
+              /* 打开播放程序 */  
+              openFile(iPlayFile);  
+          }  
+      }  
+  });  
+  /* 删除 */  
+  iDeleteButton.setOnClickListener(new ImageButton.OnClickListener() {  
+      @Override  
+      public void onClick(View arg0) {  
+          // TODO Auto-generated method stub  
+          if (iPlayFile != null) {  
+              /* 先将Adapter删除文件名 */  
+              iAdapter.remove(iPlayFile.getName());  
+              /* 删除文件 */  
+              if (iPlayFile.exists())  
+                  iPlayFile.delete();  
+              iTextView.setText("删除完成");  
+          }  
+      }  
+  });  
+  
+  iListView.setOnItemClickListener(new AdapterView.OnItemClickListener() {  
+      @Override  
+      public void onItemClick(AdapterView<?> arg0, View arg1, int arg2,  
+              long arg3) {  
+          /* 当有点击文件名时将删除及播放按钮Enable */  
+          iPlayButton.setEnabled(true);  
+          iDeleteButton.setEnabled(true);  
+          iPlayFile = new File(iRecAudioDir.getAbsolutePath()  
+                  + File.separator + ((CheckedTextView) arg1).getText());  
+          iTextView.setText("您选择的是：" + ((CheckedTextView) arg1).getText());  
+      }  
+  });  
+ 
+
+
+在Activity的onStop()方法也要加进去释放iMediaRecorder的语句。
+
+view plaincopy to clipboardprint?
+    @Override  
+    protected void onStop() {  
+        if (iMediaRecorder != null && !isStopRecord) {  
+            /* 停止录音 */  
+            iMediaRecorder.stop();  
+            iMediaRecorder.release();  
+            iMediaRecorder = null;  
+        }  
+        super.onStop();  
+    }  
+  
+这是一个自定义方法，目的是从手机存储卡中取出以.amr结尾的文件。  
+    private void getRecordFiles() {  
+        iRecordFiles = new ArrayList<String>();  
+        if (isSDCardExit) {  
+            File files[] = iRecAudioDir.listFiles();  
+            if (files != null) {  
+                for (int i = 0; i < files.length; i++) {  
+                    if (files[i].getName().indexOf(".") >= 0) {  
+                        String fileS = files[i].getName().substring(  
+                                files[i].getName().indexOf("."));  
+                        if (fileS.toLowerCase().equals(".amr"))  
+                            iRecordFiles.add(files[i].getName());  
+                    }  
+                }  
+            }  
+        }  
+    }  
+
+
+调用系统自带播放器来播放刚才录制好的声音片段。OPhone系统会根据文件类型来自动决定使用何种工具来打开对应的文件。当然我们还可以用OPhone提供的MediaPlayer类来实现声音片段的播放，由于篇幅有限，这里不再介绍。
+
+ 
+
+view plaincopy to clipboardprint?
+private void openFile(File aFile) {  
+    Intent intent = new Intent();  
+    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);  
+    intent.setAction(android.content.Intent.ACTION_VIEW);  
+    String type = getMIMEType(aFile);  
+    intent.setDataAndType(Uri.fromFile(aFile), type);  
+    startActivity(intent);  
+}  
+  
+private String getMIMEType(File aFile) {  
+    String end = aFile.getName().substring(  
+            aFile.getName().lastIndexOf(".") + 1, aFile.getName().length())  
+            .toLowerCase();  
+    String type = "";  
+    if (end.equals("mp3") || end.equals("aac") || end.equals("aac")  
+            || end.equals("amr") || end.equals("mpeg") || end.equals("mp4")) {  
+        type = "audio";  
+    } else if (end.equals("jpg") || end.equals("gif") || end.equals("png")  
+            || end.equals("jpeg")) {  
+        type = "image";  
+    } else {  
+        type = "*";  
+    }  
+    type += "/*";  
+    return type;  
+}  
+
+添加权限许可
+
+
+如果只是写好了程序还不算完工，最后我们需要在AndroidManifest.xml文件中将程序的录音权限打开！这样才能成为一个完整的程序。
+
+ 
+
+view plaincopy to clipboardprint?
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"  
+      android:versionCode="1"  
+      android:versionName="1.0" package="com.ophone.iRecorder">  
+     <application  
+    android:icon="@drawable/icon"  
+    android:label="@string/app_name">  
+        <activity android:name=".ActivityMain"  
+                  android:label="@string/app_name">  
+            <intent-filter>  
+                <action  
+                android:name="android.intent.action.MAIN" />  
+                <category  
+                android:name="android.intent.category.LAUNCHER" />  
+            </intent-filter>  
+        </activity>  
+    </application>  
+<uses-permission android:name="android.permission.RECORD_AUDIO">  
+</uses-permission>  
+</manifest>  
